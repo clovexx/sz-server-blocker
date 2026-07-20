@@ -1,4 +1,5 @@
 [![CI](https://github.com/clovexx/sz-server-blocker/actions/workflows/ci.yml/badge.svg)](https://github.com/clovexx/sz-server-blocker/actions/workflows/ci.yml)
+[![AUR version](https://img.shields.io/aur/version/stalzone-server-blocker?label=AUR)](https://aur.archlinux.org/packages/stalzone-server-blocker)
 [![License: MIT](https://img.shields.io/github/license/clovexx/sz-server-blocker)](LICENSE)
 
 # Блокировщик серверов Stalzone
