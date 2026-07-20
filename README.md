@@ -1,4 +1,5 @@
 [![CI](https://github.com/clovexx/sz-server-blocker/actions/workflows/ci.yml/badge.svg)](https://github.com/clovexx/sz-server-blocker/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/stalzone-server-blocker)](https://crates.io/crates/stalzone-server-blocker)
 [![AUR version](https://img.shields.io/aur/version/stalzone-server-blocker?label=AUR)](https://aur.archlinux.org/packages/stalzone-server-blocker)
 [![License: MIT](https://img.shields.io/github/license/clovexx/sz-server-blocker)](LICENSE)
 
@@ -9,6 +10,12 @@
 TUI для Linux: выборочная блокировка серверов Stalcraft через nftables или iptables.
 
 ## Установка
+
+**crates.io:**
+
+```bash
+cargo install stalzone-server-blocker
+```
 
 **AUR:**
 

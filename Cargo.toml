@@ -2,6 +2,15 @@
 name = "stalzone-server-blocker"
 version = "0.1.0"
 edition = "2021"
+description = "Блокировщик серверов Stalzone для Linux: TUI и CLI через nftables/iptables"
+license = "MIT"
+authors = ["clovexx <clovexx.github@gmail.com>"]
+repository = "https://github.com/clovexx/sz-server-blocker"
+homepage = "https://github.com/clovexx/sz-server-blocker"
+readme = "README.md"
+keywords = ["stalzone", "nftables", "iptables", "tui", "firewall"]
+categories = ["command-line-utilities"]
+exclude = ["/packaging", "/.github", "/.demo-config"]
 
 [dependencies]
 anyhow = "1"
