@@ -1,3 +1,6 @@
+[![CI](https://github.com/clovexx/sz-server-blocker/actions/workflows/ci.yml/badge.svg)](https://github.com/clovexx/sz-server-blocker/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/clovexx/sz-server-blocker)](LICENSE)
+
 # Блокировщик серверов Stalzone
 
 > **Предупреждение:** сетевые утилиты могут противоречить пользовательскому соглашению игры.
