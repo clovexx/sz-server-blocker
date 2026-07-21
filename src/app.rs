@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use tokio::sync::mpsc;
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -13,8 +14,10 @@ use std::io::stdout;
 use std::sync::mpsc as std_mpsc;
 use std::thread;
 use std::time::Duration;
+use tokio::runtime::Runtime;
 
 use crate::firewall::{self, Backend};
+use crate::ping::{self, PingResult};
 use crate::server::{self, Server};
 use crate::settings::Settings;
 use crate::sync_api;
@@ -55,6 +58,13 @@ pub enum StatusMessage {
 pub struct ServerEntry {
     pub server: Server,
     pub blocked: bool,
+    pub ping: Option<PingResult>,
+}
+
+struct PingJob {
+    total: usize,
+    completed: usize,
+    rx: mpsc::UnboundedReceiver<(usize, PingResult)>,
 }
 
 pub struct App {
@@ -66,12 +76,15 @@ pub struct App {
     pub input_mode: InputMode,
     pub backend: Backend,
     pub blocking_active: bool,
+    pub pinging: bool,
+    ping_job: Option<PingJob>,
     pub status_message: Option<StatusMessage>,
     pub settings: Settings,
     pub systemd_status: String,
     pub api_login_draft: String,
     pub table_state: TableState,
     pub settings_table_state: TableState,
+    rt: Runtime,
 }
 
 impl App {
@@ -96,6 +109,7 @@ impl App {
                 ServerEntry {
                     server,
                     blocked,
+                    ping: None,
                 }
             })
             .collect();
@@ -112,12 +126,15 @@ impl App {
             input_mode: InputMode::Normal,
             backend,
             blocking_active,
+            pinging: false,
+            ping_job: None,
             status_message,
             settings,
             systemd_status,
             api_login_draft: String::new(),
             table_state: TableState::default(),
             settings_table_state: TableState::default(),
+            rt: Runtime::new().context("не удалось создать tokio runtime")?,
         })
     }
 
@@ -141,6 +158,11 @@ impl App {
             .filter(|e| e.blocked)
             .map(|e| e.server.name.clone())
             .collect();
+        let pings: std::collections::HashMap<_, _> = self
+            .entries
+            .iter()
+            .filter_map(|e| e.ping.map(|ping| (e.server.name.clone(), ping)))
+            .collect();
 
         let servers = server::load_servers()?;
         self.entries = servers
@@ -149,6 +171,7 @@ impl App {
                 let name = server.name.clone();
                 ServerEntry {
                     blocked: blocked.contains(&name),
+                    ping: pings.get(&name).copied(),
                     server,
                 }
             })
@@ -349,6 +372,80 @@ impl App {
         }
     }
 
+    pub fn ping_progress(&self) -> Option<(usize, usize)> {
+        self.ping_job
+            .as_ref()
+            .map(|job| (job.completed, job.total))
+    }
+
+    pub fn start_ping(&mut self) -> Result<()> {
+        if self.pinging {
+            return Ok(());
+        }
+
+        if self.blocking_active {
+            self.apply_blocking()?;
+        }
+
+        let indices: Vec<usize> = if self.filter.is_empty() {
+            (0..self.entries.len()).collect()
+        } else {
+            self.visible_indices()
+        };
+
+        if indices.is_empty() {
+            return Ok(());
+        }
+
+        let items: Vec<(usize, Server)> = indices
+            .into_iter()
+            .map(|idx| (idx, self.entries[idx].server.clone()))
+            .collect();
+        let total = items.len();
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        self.rt.spawn(ping::ping_servers_progress(items, tx));
+        self.ping_job = Some(PingJob {
+            total,
+            completed: 0,
+            rx,
+        });
+        self.pinging = true;
+        self.update_ping_status();
+        Ok(())
+    }
+
+    pub fn poll_ping(&mut self) {
+        let Some(job) = &mut self.ping_job else {
+            return;
+        };
+
+        while let Ok((idx, result)) = job.rx.try_recv() {
+            if let Some(entry) = self.entries.get_mut(idx) {
+                entry.ping = Some(result);
+            }
+            job.completed += 1;
+        }
+
+        if job.completed >= job.total {
+            self.ping_job = None;
+            self.pinging = false;
+            self.status_message = Some(StatusMessage::Info("пинг проверен".into()));
+        } else {
+            self.update_ping_status();
+        }
+    }
+
+    fn update_ping_status(&mut self) {
+        let Some((done, total)) = self.ping_progress() else {
+            return;
+        };
+        let percent = done * 100 / total.max(1);
+        self.status_message = Some(StatusMessage::Info(format!(
+            "пинг {done}/{total} ({percent}%)"
+        )));
+    }
+
     pub fn apply_blocking(&mut self) -> Result<()> {
         let ips: Vec<String> = self
             .entries
@@ -412,6 +509,7 @@ pub fn run_tui() -> Result<()> {
     let mut last_tick = std::time::Instant::now();
 
     let result = loop {
+        app.poll_ping();
         terminal.draw(|frame| ui::draw(frame, &mut app))?;
 
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());

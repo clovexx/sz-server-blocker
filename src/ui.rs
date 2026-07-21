@@ -7,6 +7,7 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use ratatui::Frame;
 
 use crate::app::{App, InputMode, Screen, SettingsRow, StatusMessage};
+use crate::ping::format_latency;
 use crate::systemd;
 
 pub fn draw_loading(frame: &mut Frame, message: &str, tick: usize) {
@@ -98,8 +99,9 @@ fn draw_table(frame: &mut Frame, area: Rect, app: &mut App) {
     let mark_w = 4u16;
     let ip_w = 16u16;
     let pool_w = 12u16;
+    let ping_w = 6u16;
 
-    let header = Row::new(vec!["", "Имя", "IP", "Пул"])
+    let header = Row::new(vec!["", "Имя", "IP", "Пул", "мс"])
     .style(Style::default().add_modifier(Modifier::BOLD))
     .bottom_margin(1);
 
@@ -109,12 +111,14 @@ fn draw_table(frame: &mut Frame, area: Rect, app: &mut App) {
         .map(|&server_idx| {
             let entry = &app.entries[server_idx];
             let mark = if entry.blocked { "[x]" } else { "[ ]" };
+            let ping = format_latency(entry.ping);
 
             Row::new(vec![
                 Cell::from(mark),
                 Cell::from(entry.server.name.clone()),
                 Cell::from(entry.server.ip.clone()),
                 Cell::from(entry.server.pool.clone()),
+                Cell::from(ping),
             ])
         })
         .collect();
@@ -124,6 +128,7 @@ fn draw_table(frame: &mut Frame, area: Rect, app: &mut App) {
         Constraint::Fill(1),
         Constraint::Length(ip_w),
         Constraint::Length(pool_w),
+        Constraint::Length(ping_w),
     ];
 
     let table = Table::new(rows, widths)
@@ -132,7 +137,7 @@ fn draw_table(frame: &mut Frame, area: Rect, app: &mut App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" [x] — заблокировать "),
+                .title(" [x] — заблокировать  |  пинг: мс, тайм, нет, — "),
         );
 
     app.table_state.select(Some(app.list_index));
@@ -140,7 +145,18 @@ fn draw_table(frame: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn draw_servers_footer(frame: &mut Frame, area: Rect, app: &App) {
-    let help = "Пробел:блок  a:пул  r:синк  b:применить  u:снять  /:поиск  s:настройки  q:выход";
+    let help = if app.pinging {
+        if let Some((done, total)) = app.ping_progress() {
+            format!(
+                "Пинг {done}/{total} {}  (можно листать список)",
+                progress_bar(done, total, 20)
+            )
+        } else {
+            "Пинг...".into()
+        }
+    } else {
+        "Пробел:блок  a:пул  p:пинг  r:синк  b:применить  u:снять  /:поиск  s:настройки  q:выход".into()
+    };
 
     let count = format!(
         " выбрано {}/{} ",
@@ -151,6 +167,16 @@ fn draw_servers_footer(frame: &mut Frame, area: Rect, app: &App) {
     let line = Line::from(vec![Span::raw(help), Span::raw(count)]);
     let block = Block::default().borders(Borders::ALL);
     frame.render_widget(Paragraph::new(line).block(block), area);
+}
+
+fn progress_bar(done: usize, total: usize, width: usize) -> String {
+    let total = total.max(1);
+    let filled = done.saturating_mul(width) / total;
+    format!(
+        "[{}{}]",
+        "█".repeat(filled),
+        "░".repeat(width.saturating_sub(filled))
+    )
 }
 
 fn draw_settings_screen(frame: &mut Frame, app: &mut App) {
@@ -283,16 +309,17 @@ fn handle_servers_key(app: &mut App, key: event::KeyEvent) -> Result<bool> {
 
     match key.code {
         KeyCode::Char('q') | KeyCode::Char('й') => return Ok(true),
-        KeyCode::Char('s') | KeyCode::Char('ы') => app.open_settings(),
-        KeyCode::Char('b') | KeyCode::Char('и') => app.apply_blocking()?,
-        KeyCode::Char('u') | KeyCode::Char('г') => app.clear_blocking()?,
-        KeyCode::Char('r') | KeyCode::Char('к') => app.sync_servers()?,
-        KeyCode::Char('a') | KeyCode::Char('ф') => app.toggle_pool(),
+        KeyCode::Char('s') | KeyCode::Char('ы') if !app.pinging => app.open_settings(),
+        KeyCode::Char('p') | KeyCode::Char('з') if !app.pinging => app.start_ping()?,
+        KeyCode::Char('b') | KeyCode::Char('и') if !app.pinging => app.apply_blocking()?,
+        KeyCode::Char('u') | KeyCode::Char('г') if !app.pinging => app.clear_blocking()?,
+        KeyCode::Char('r') | KeyCode::Char('к') if !app.pinging => app.sync_servers()?,
+        KeyCode::Char('a') | KeyCode::Char('ф') if !app.pinging => app.toggle_pool(),
         KeyCode::Char('/') => {
             app.input_mode = InputMode::Filter;
             app.filter.clear();
         }
-        KeyCode::Char(' ') => app.toggle_selected(),
+        KeyCode::Char(' ') if !app.pinging => app.toggle_selected(),
         KeyCode::Up => app.move_selection(-1),
         KeyCode::Down => app.move_selection(1),
         KeyCode::PageUp => app.move_selection(-10),
